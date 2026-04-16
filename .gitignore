@@ -1,6 +1,36 @@
+# Python virtual environments
 .venv/
 venv/
+
+# Python cache / temp
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# Environment variables / secrets
 .env
+
+# Node dependencies
 node_modules/
+
+# Frontend build output 
+frontend/dist/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Jupyter temp
+*.nbconvert.ipynb
+
+#model files
+model/
+
+.ipynb_checkpoints/
