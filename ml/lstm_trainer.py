@@ -15,6 +15,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.layers import Dense, Dropout, Embedding, LSTM
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -35,6 +36,8 @@ class AirlineSentimentLSTMTrainer:
         self.max_len = 50
         self.epochs = 10
         self.batch_size = 32
+        self.early_stopping_patience = 2
+        self.lr_plateau_patience = 1
 
         self.label_encoder = LabelEncoder()
         self.tokenizer: Tokenizer | None = None
@@ -139,6 +142,35 @@ class AirlineSentimentLSTMTrainer:
             "confusion_matrix": confusion_matrix(y_true, y_pred).tolist(),
         }
 
+    def build_callbacks(self) -> list[tf.keras.callbacks.Callback]:
+        return [
+            EarlyStopping(
+                monitor="val_loss",
+                patience=self.early_stopping_patience,
+                restore_best_weights=True,
+                verbose=1,
+            ),
+            ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=0.5,
+                patience=self.lr_plateau_patience,
+                verbose=1,
+            ),
+        ]
+
+    def make_json_safe(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: self.make_json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self.make_json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [self.make_json_safe(item) for item in value]
+        if isinstance(value, (np.floating, np.integer)):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        return value
+
     def save_artifacts(self, history: dict[str, list[float]], metrics: dict[str, Any]) -> None:
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("Model and tokenizer must exist before saving artifacts.")
@@ -152,21 +184,25 @@ class AirlineSentimentLSTMTrainer:
             pickle.dump(self.label_encoder, file)
 
         with open(self.output_dir / "history.json", "w", encoding="utf-8") as file:
-            json.dump(history, file, indent=2)
+            json.dump(self.make_json_safe(history), file, indent=2)
 
         with open(self.output_dir / "metrics.json", "w", encoding="utf-8") as file:
-            json.dump(metrics, file, indent=2)
+            json.dump(self.make_json_safe(metrics), file, indent=2)
 
         with open(self.output_dir / "config.json", "w", encoding="utf-8") as file:
             json.dump(
-                {
-                    "dataset_path": str(self.dataset_path),
-                    "max_words": self.max_words,
-                    "max_len": self.max_len,
-                    "epochs": self.epochs,
-                    "batch_size": self.batch_size,
-                    "classes": list(self.label_encoder.classes_),
-                },
+                self.make_json_safe(
+                    {
+                        "dataset_path": str(self.dataset_path),
+                        "max_words": self.max_words,
+                        "max_len": self.max_len,
+                        "epochs": self.epochs,
+                        "batch_size": self.batch_size,
+                        "early_stopping_patience": self.early_stopping_patience,
+                        "lr_plateau_patience": self.lr_plateau_patience,
+                        "classes": list(self.label_encoder.classes_),
+                    }
+                ),
                 file,
                 indent=2,
             )
@@ -176,6 +212,7 @@ class AirlineSentimentLSTMTrainer:
         X_train, X_test, y_train, y_test = self.split_dataset(tweets)
         X_train_pad, X_test_pad = self.prepare_sequences(X_train, X_test)
         class_weight_dict = self.compute_class_weights(y_train)
+        callbacks = self.build_callbacks()
 
         model = self.build_model()
         history = model.fit(
@@ -185,6 +222,7 @@ class AirlineSentimentLSTMTrainer:
             batch_size=self.batch_size,
             validation_split=0.2,
             class_weight=class_weight_dict,
+            callbacks=callbacks,
             verbose=1,
         )
 
