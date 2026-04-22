@@ -1,0 +1,24 @@
+{
+  "tweets": [
+    {
+      "id": 1,
+      "text": "@Airline My flight is delayed again. This is frustrating."
+    },
+    {
+      "id": 2,
+      "text": "Great service from the cabin crew today. Very impressed!"
+    },
+    {
+      "id": 3,
+      "text": "The flight was okay, nothing special but arrived on time."
+    },
+    {
+      "id": 4,
+      "text": "Lost my baggage and customer support was unhelpful."
+    },
+    {
+      "id": 5,
+      "text": "Smooth boarding process and friendly staff."
+    }
+  ]
+}
