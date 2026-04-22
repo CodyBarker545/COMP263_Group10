@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import pickle
 import re
 from pathlib import Path
@@ -221,9 +222,13 @@ service = SentimentInferenceService(repo_root)
 
 app = FastAPI(title="Airline Sentiment API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
+
+_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+_allowed_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", _default_origins).split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

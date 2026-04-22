@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+const MAX_TWEET_LENGTH = 280;
 
 function formatPercent(value) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -8,6 +9,22 @@ function formatPercent(value) {
   }
 
   return `${Math.round(value * 100)}%`;
+}
+
+async function fetchHealthWithRetry(signal, maxAttempts = 5, baseDelayMs = 1500) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`, { signal });
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      if (err.name === "AbortError") throw err;
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * 2 ** attempt));
+      }
+    }
+  }
+  return { lstm_ready: false, transformer_ready: false, unreachable: true };
 }
 
 export default function App() {
@@ -20,34 +37,25 @@ export default function App() {
   const [selectedFileName, setSelectedFileName] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [health, setHealth] = useState(null);
+  const [healthRetrying, setHealthRetrying] = useState(false);
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadHealth() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/health`);
-        const data = await response.json();
-        if (isMounted) {
-          setHealth(data);
-        }
-      } catch {
-        if (isMounted) {
-          setHealth({
-            lstm_ready: false,
-            transformer_ready: false,
-            unreachable: true,
-          });
-        }
-      }
+  const loadHealth = async (signal) => {
+    setHealthRetrying(true);
+    try {
+      const data = await fetchHealthWithRetry(signal);
+      setHealth(data);
+    } catch {
+      // AbortError on unmount — ignore
+    } finally {
+      setHealthRetrying(false);
     }
+  };
 
-    loadHealth();
-
-    return () => {
-      isMounted = false;
-    };
+  useEffect(() => {
+    const controller = new AbortController();
+    loadHealth(controller.signal);
+    return () => controller.abort();
   }, []);
 
   const handleAnalyze = async (event) => {
@@ -55,6 +63,12 @@ export default function App() {
 
     if (!tweet.trim()) {
       setError("Enter a tweet before running sentiment analysis.");
+      setResult(null);
+      return;
+    }
+
+    if (tweet.length > MAX_TWEET_LENGTH) {
+      setError(`Tweet is too long (${tweet.length} chars). Please keep it under ${MAX_TWEET_LENGTH} characters.`);
       setResult(null);
       return;
     }
@@ -135,14 +149,26 @@ export default function App() {
       const matchedName = contentDisposition?.match(/filename="(.+)"/);
       const downloadName = matchedName?.[1] || "classified_tweets.json";
 
-      anchor.href = url;
+      // Read blob to count classified tweets before triggering download
+      const text = await blob.text();
+      let classifiedCount = 0;
+      try {
+        classifiedCount = JSON.parse(text).length;
+      } catch {
+        // fall through — count stays 0
+      }
+
+      const downloadBlob = new Blob([text], { type: "application/json" });
+      const downloadUrl = window.URL.createObjectURL(downloadBlob);
+      anchor.href = downloadUrl;
       anchor.download = downloadName;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(downloadUrl);
 
-      setUploadMessage(`Processed ${selectedFile.name} and downloaded ${downloadName}.`);
+      const countLabel = classifiedCount > 0 ? `Classified ${classifiedCount} tweets — ` : "";
+      setUploadMessage(`${countLabel}downloaded ${downloadName}.`);
       setSelectedFile(null);
       setSelectedFileName("");
       if (fileInputRef.current) {
@@ -190,6 +216,15 @@ export default function App() {
           {health?.unreachable ? (
             <span className="health-chip unhealthy">Backend offline</span>
           ) : null}
+          <button
+            className="ghost-button"
+            type="button"
+            disabled={healthRetrying}
+            onClick={() => loadHealth(new AbortController().signal)}
+            style={{ fontSize: "0.75rem", padding: "0.2rem 0.6rem" }}
+          >
+            {healthRetrying ? "Checking…" : "↻ Retry"}
+          </button>
         </div>
 
         <form className="sentiment-form" onSubmit={handleAnalyze}>
@@ -244,7 +279,7 @@ export default function App() {
           <div className="helper-row">
             <span className="helper-text">
               Upload a JSON array of tweet strings or tweet objects with a
-              `text` or `tweet` field.
+              `text`, `tweet`, `content`, or `message` field.
             </span>
             {selectedFileName ? (
               <span className="file-chip">{selectedFileName}</span>

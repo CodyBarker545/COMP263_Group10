@@ -14,6 +14,7 @@ import tensorflow as tf
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_class_weight
 from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 
 
@@ -104,8 +105,16 @@ class AirlineSentimentTransformerTrainer:
         self.model = model
         return model
 
-    def evaluate(self, y_true: pd.Series, y_pred: np.ndarray, test_loss: float, test_accuracy: float) -> dict[str, Any]:
-        return {
+    def compute_class_weights(self, y_train: pd.Series) -> dict[int, float]:
+        classes = np.unique(y_train)
+        class_weights = compute_class_weight(
+            class_weight="balanced",
+            classes=classes,
+            y=y_train,
+        )
+        return {int(label): float(weight) for label, weight in zip(classes, class_weights)}
+
+    def evaluate(self, y_true: pd.Series, y_pred: np.ndarray, test_loss: float, test_accuracy: float) -> dict[str, Any]:        return {
             "test_loss": float(test_loss),
             "test_accuracy": float(test_accuracy),
             "accuracy": float(accuracy_score(y_true, y_pred)),
@@ -159,6 +168,7 @@ class AirlineSentimentTransformerTrainer:
         train_encodings = self.encode_text(X_train)
         test_encodings = self.encode_text(X_test)
 
+        class_weight_dict = self.compute_class_weights(y_train)
         model = self.build_model()
         history = model.fit(
             {
@@ -169,6 +179,7 @@ class AirlineSentimentTransformerTrainer:
             validation_split=0.2,
             epochs=self.epochs,
             batch_size=self.batch_size,
+            class_weight=class_weight_dict,
             verbose=1,
         )
 
